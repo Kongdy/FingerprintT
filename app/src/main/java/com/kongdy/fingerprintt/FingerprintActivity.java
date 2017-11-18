@@ -77,6 +77,9 @@ public class FingerprintActivity extends AppCompatActivity {
         });
     }
 
+    /**
+     * 注意下方TargetApi只在23之后生效,可能要增加版本适配
+     */
     @TargetApi(Build.VERSION_CODES.M)
     private void startFinger() {
         if (fingerDialog.isShowing())

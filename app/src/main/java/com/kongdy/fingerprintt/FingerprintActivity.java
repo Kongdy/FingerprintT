@@ -1,7 +1,11 @@
 package com.kongdy.fingerprintt;
 
 import android.Manifest;
+import android.annotation.TargetApi;
 import android.content.pm.PackageManager;
+import android.os.Build;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.hardware.fingerprint.FingerprintManagerCompat;
@@ -10,18 +14,24 @@ import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.support.v7.widget.AppCompatButton;
+import android.support.v7.widget.AppCompatTextView;
 import android.view.View;
 import android.widget.Toast;
 
 import java.io.IOException;
 import java.security.InvalidKeyException;
+import java.security.KeyPairGenerator;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.Signature;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
+import java.security.spec.ECGenParameterSpec;
 
 import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
 
@@ -33,6 +43,9 @@ import javax.crypto.SecretKey;
 public class FingerprintActivity extends AppCompatActivity {
 
     private AppCompatButton acbtn_do_finger;
+    private AppCompatTextView actv_error_tip;
+
+
     private FingerprintManagerCompat fingerprintManagerCompat;
     private AlertDialog fingerDialog;
 
@@ -45,8 +58,8 @@ public class FingerprintActivity extends AppCompatActivity {
 
         fingerprintManagerCompat = FingerprintManagerCompat.from(this);
 
-
         acbtn_do_finger = findViewById(R.id.acbtn_do_finger);
+        actv_error_tip = findViewById(R.id.actv_error_tip);
 
         // init dialog
         fingerDialog = new AlertDialog.Builder(FingerprintActivity.this)
@@ -64,48 +77,60 @@ public class FingerprintActivity extends AppCompatActivity {
         });
     }
 
+    @TargetApi(Build.VERSION_CODES.M)
     private void startFinger() {
         if (fingerDialog.isShowing())
             fingerDialog.dismiss();
         fingerDialog.show();
-//        try {
-//            Cipher cipher = Cipher.getInstance("AES/CBC/PKCS7Padding");
-//            KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
-//            keyStore.load(null);
-//            SecretKey secretKey = (SecretKey) keyStore.getKey("androiddebugkey", null);
-//            cipher.init(Cipher.ENCRYPT_MODE, secretKey);
-//            FingerprintManagerCompat.CryptoObject cryptoObject = new FingerprintManagerCompat.CryptoObject(cipher);
-            fingerprintManagerCompat.authenticate(null, 0, new CancellationSignal(), new FingerprintManagerCompat.AuthenticationCallback() {
-                        @Override
-                        public void onAuthenticationError(int errMsgId, CharSequence errString) {
-                            showTip("指纹出错，请重新设置系统指纹");
-                            fingerDialog.dismiss();
-                        }
+        try {
+                KeyGenerator keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+                keyGenerator.init(new KeyGenParameterSpec.Builder("androiddebugkey",
+                        KeyProperties.PURPOSE_ENCRYPT |
+                                KeyProperties.PURPOSE_DECRYPT)
+                        .setBlockModes(KeyProperties.BLOCK_MODE_CBC)
+                        .setUserAuthenticationRequired(true)
+                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_PKCS7)
+                        .build());
+                SecretKey secretKey = keyGenerator.generateKey();
+                Cipher cipher = Cipher.getInstance(KeyProperties.KEY_ALGORITHM_AES + "/"
+                        + KeyProperties.BLOCK_MODE_CBC + "/"
+                        + KeyProperties.ENCRYPTION_PADDING_PKCS7);
+                cipher.init(Cipher.ENCRYPT_MODE, secretKey);
+                FingerprintManagerCompat.CryptoObject cryptoObject = new FingerprintManagerCompat.CryptoObject(cipher);
+                fingerprintManagerCompat.authenticate(cryptoObject, 0, new CancellationSignal(), new FingerprintManagerCompat.AuthenticationCallback() {
+                            @Override
+                            public void onAuthenticationError(int errMsgId, CharSequence errString) {
+                                // 多次指纹密码验证错误后，进入此方法；并且，不能短时间内调用指纹验证,一般间隔从几秒到几十秒不等
+                                showTip("指纹出错:"+errString+",errMsgId:"+errMsgId);
+                                fingerDialog.dismiss();
+                            }
 
-                        @Override
-                        public void onAuthenticationHelp(int helpMsgId, CharSequence helpString) {
-                     //       showTip("show help");
-                    //        fingerDialog.dismiss();
-                        }
+                            @Override
+                            public void onAuthenticationHelp(int helpMsgId, CharSequence helpString) {
+                                //       showTip("show help");
+                                //        fingerDialog.dismiss();
+                            }
 
-                        @Override
-                        public void onAuthenticationSucceeded(FingerprintManagerCompat.AuthenticationResult result) {
-                            showTip("指纹授权成功");
-                            fingerDialog.dismiss();
-                        }
+                            @Override
+                            public void onAuthenticationSucceeded(FingerprintManagerCompat.AuthenticationResult result) {
+                                showTip("指纹授权成功");
+                                showStaticError("");
+                                fingerDialog.dismiss();
+                            }
 
-                        @Override
-                        public void onAuthenticationFailed() {
-                            showTip("指纹授权失败");
-                            fingerDialog.dismiss();
-                        }
-                    }, null
-            );
-//        } catch (CertificateException | IOException |
-//                InvalidKeyException | NoSuchAlgorithmException | UnrecoverableKeyException | KeyStoreException | NoSuchPaddingException e) {
-//            showTip("指纹加密对象创建失败，错误:" + e.toString());
-//            fingerDialog.dismiss();
-//        }
+                            @Override
+                            public void onAuthenticationFailed() {
+                                showTip("指纹授权失败");
+                                fingerDialog.dismiss();
+                            }
+                        }, null
+                );
+        } catch (Exception e) {
+            String msg = "指纹加密对象创建失败，错误:" + e.toString();
+            showTip(msg);
+            showStaticError(msg);
+            fingerDialog.dismiss();
+        }
     }
 
     private boolean checkFingerEnvironment() {
@@ -141,6 +166,10 @@ public class FingerprintActivity extends AppCompatActivity {
     }
 
     private void showTip(String msg) {
-        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+    }
+
+    private void showStaticError(String msg) {
+        actv_error_tip.setText(msg);
     }
 }
